@@ -285,8 +285,64 @@ async function criarDevice() {
   });
 
   const data = await res.json();
-  alert("Dispositivo criado. Copie a API Key para o ESP32:\\n\\n" + data.apiKey);
-  await carregarDevices();
+
+  if (!data.apiKey) {
+    alert("Erro ao criar dispositivo");
+    return;
+  }
+
+  // cria modal simples
+  const modal = document.createElement("div");
+  modal.innerHTML = `
+    <div style="
+      position:fixed;
+      top:0; left:0;
+      width:100%;
+      height:100%;
+      background:rgba(0,0,0,0.7);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      z-index:9999;
+    ">
+      <div style="
+        background:#1e293b;
+        padding:25px;
+        border-radius:16px;
+        width:90%;
+        max-width:500px;
+        text-align:center;
+      ">
+        <h2>API Key do dispositivo</h2>
+
+        <textarea id="apiKeyBox" style="
+          width:100%;
+          height:100px;
+          margin:15px 0;
+          padding:10px;
+          border-radius:8px;
+          background:#020617;
+          color:#38bdf8;
+        ">${data.apiKey}</textarea>
+
+        <button onclick="copiarApiKey()">Copiar</button>
+        <button onclick="fecharModal()">Fechar</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+}
+
+function copiarApiKey() {
+  const box = document.getElementById("apiKeyBox");
+  box.select();
+  document.execCommand("copy");
+  alert("API Key copiada!");
+}
+
+function fecharModal() {
+  document.body.removeChild(document.body.lastChild);
 }
 
 async function carregarDevices() {
