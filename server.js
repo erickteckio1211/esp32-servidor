@@ -279,7 +279,7 @@ app.post("/api/login", async (req,res)=>{
 });
 
 app.post("/api/devices", authUser, async (req,res)=>{
-  const apiKey = crypto.randomBytes(32).toString("hex");
+  const apiKey = crypto.randomBytes(6).toString("hex"); // 12 caracteres
 
   const device = await Device.create({
     userId:req.user.userId,
