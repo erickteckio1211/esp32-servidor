@@ -56,77 +56,161 @@ function authUser(req, res, next) {
 /* ===================== FRONT ===================== */
 
 app.get("/", (req, res) => {
-  res.send(`
+res.send(`
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="UTF-8">
-<title>Dashboard ESP32</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP32 Monitor</title>
+
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
 <style>
-body { font-family: Arial; background:#0f172a; color:white; padding:20px; }
-.box { background:#1e293b; padding:20px; border-radius:10px; margin-bottom:20px; }
-input, button, select { padding:10px; margin:5px; border-radius:6px; border:none; }
-button { background:#38bdf8; cursor:pointer; }
+body {
+  margin:0;
+  font-family: system-ui;
+  background:#0f172a;
+  color:white;
+}
+
+.container {
+  max-width:420px;
+  margin:auto;
+  padding:20px;
+}
+
+.card {
+  background:#1e293b;
+  padding:20px;
+  border-radius:16px;
+  margin-bottom:20px;
+}
+
+input, button {
+  width:100%;
+  padding:14px;
+  margin-top:10px;
+  border:none;
+  border-radius:10px;
+}
+
+input {
+  background:#334155;
+  color:white;
+}
+
+button {
+  background:#38bdf8;
+  font-weight:bold;
+  cursor:pointer;
+}
+
+.small {
+  text-align:center;
+  margin-top:10px;
+  color:#94a3b8;
+  cursor:pointer;
+}
+
+.device {
+  padding:15px;
+  background:#020617;
+  border-radius:12px;
+  margin-top:10px;
+}
+
+.badge {
+  font-size:12px;
+  color:#22c55e;
+}
+
+.value {
+  font-size:28px;
+  font-weight:bold;
+}
+
 .hidden { display:none; }
-textarea { width:100%; height:80px; }
 </style>
 </head>
+
 <body>
 
-<h1>ESP32 Dashboard</h1>
+<div class="container">
 
-<div id="auth">
-  <div class="box">
-    <h2>Login</h2>
+<!-- LOGIN -->
+<div id="login">
+  <h2>Entrar</h2>
+  <div class="card">
     <input id="email" placeholder="Email">
     <input id="senha" type="password" placeholder="Senha">
     <button onclick="login()">Entrar</button>
-  </div>
-
-  <div class="box">
-    <h2>Criar conta</h2>
-    <input id="nomeC" placeholder="Nome">
-    <input id="emailC" placeholder="Email">
-    <input id="senhaC" type="password" placeholder="Senha">
-    <button onclick="cadastrar()">Cadastrar</button>
+    <div class="small" onclick="showRegister()">Criar conta</div>
   </div>
 </div>
 
+<!-- REGISTER -->
+<div id="register" class="hidden">
+  <h2>Criar conta</h2>
+  <div class="card">
+    <input id="nomeC" placeholder="Nome">
+    <input id="emailC" placeholder="Email">
+    <input id="senhaC" type="password" placeholder="Senha">
+    <button onclick="register()">Criar</button>
+    <div class="small" onclick="showLogin()">Já tenho conta</div>
+  </div>
+</div>
+
+<!-- DASHBOARD -->
 <div id="dash" class="hidden">
 
-  <button onclick="logout()">Sair</button>
+  <h2>Meus dispositivos</h2>
 
-  <div class="box">
-    <h2>Novo dispositivo</h2>
-    <input id="nomeD" placeholder="Nome">
+  <div class="card">
+    <input id="nomeD" placeholder="Nome do dispositivo">
     <input id="deviceId" placeholder="deviceId">
-    <button onclick="criarDevice()">Criar</button>
+    <button onclick="createDevice()">Adicionar dispositivo</button>
   </div>
 
-  <div class="box">
-    <h2>Dispositivos</h2>
+  <div id="deviceList"></div>
+
+  <div class="card">
     <select id="devices" onchange="loadData()"></select>
   </div>
 
-  <div class="box">
-    <h3>Temperatura: <span id="temp">--</span></h3>
-    <h3>pH: <span id="ph">--</span></h3>
+  <div class="card">
+    <div>Temperatura</div>
+    <div id="temp" class="value">--</div>
+
+    <div>pH</div>
+    <div id="ph" class="value">--</div>
   </div>
 
-  <div class="box">
+  <div class="card">
     <canvas id="chart"></canvas>
   </div>
 
 </div>
 
+</div>
+
 <script>
+
 let token = localStorage.getItem("token");
 let chart;
 
 if(token) showDash();
 
-async function cadastrar(){
+function showRegister(){
+  login.style.display="none";
+  register.style.display="block";
+}
+
+function showLogin(){
+  register.style.display="none";
+  login.style.display="block";
+}
+
+async function register(){
   await fetch("/api/register",{
     method:"POST",
     headers:{"Content-Type":"application/json"},
@@ -136,7 +220,8 @@ async function cadastrar(){
       password:senhaC.value
     })
   });
-  alert("Usuário criado");
+  alert("Conta criada!");
+  showLogin();
 }
 
 async function login(){
@@ -148,31 +233,29 @@ async function login(){
       password:senha.value
     })
   });
+
   const data = await res.json();
   token = data.token;
   localStorage.setItem("token",token);
+
   showDash();
 }
 
-function logout(){
-  localStorage.removeItem("token");
-  location.reload();
-}
-
 async function showDash(){
-  auth.classList.add("hidden");
-  dash.classList.remove("hidden");
+  login.style.display="none";
+  register.style.display="none";
+  dash.style.display="block";
 
   chart = new Chart(document.getElementById("chart"),{
     type:"line",
-    data:{labels:[],datasets:[{label:"Temp",data:[]}]}
+    data:{labels:[],datasets:[{label:"Temperatura",data:[]}]}
   });
 
-  await loadDevices();
+  loadDevices();
   setInterval(loadData,3000);
 }
 
-async function criarDevice(){
+async function createDevice(){
   const res = await fetch("/api/devices",{
     method:"POST",
     headers:{
@@ -187,45 +270,33 @@ async function criarDevice(){
 
   const data = await res.json();
 
-  const modal = document.createElement("div");
-  modal.innerHTML = \`
-    <div style="position:fixed;top:0;left:0;width:100%;height:100%;background:#000a;display:flex;align-items:center;justify-content:center;">
-      <div style="background:#1e293b;padding:20px;border-radius:10px;">
-        <h2>API KEY</h2>
-        <textarea id="box">\${data.apiKey}</textarea>
-        <button onclick="copy()">Copiar</button>
-        <button onclick="closeModal()">Fechar</button>
-      </div>
-    </div>
-  \`;
-  document.body.appendChild(modal);
-
-  await loadDevices();
-}
-
-function copy(){
-  const b=document.getElementById("box");
-  b.select();
-  document.execCommand("copy");
-  alert("Copiado!");
-}
-
-function closeModal(){
-  document.body.removeChild(document.body.lastChild);
+  alert("API Key:\n"+data.apiKey);
+  loadDevices();
 }
 
 async function loadDevices(){
   const res = await fetch("/api/devices",{
-    headers:{"Authorization":"Bearer "+token}
+    headers:{Authorization:"Bearer "+token}
   });
+
   const data = await res.json();
 
   devices.innerHTML="";
+  deviceList.innerHTML="";
+
   data.forEach(d=>{
     const o=document.createElement("option");
     o.value=d.deviceId;
     o.textContent=d.name;
     devices.appendChild(o);
+
+    const div=document.createElement("div");
+    div.className="device";
+    div.innerHTML=\`
+      <b>\${d.name}</b><br>
+      <span class="badge">Ativo</span>
+    \`;
+    deviceList.appendChild(div);
   });
 
   loadData();
@@ -236,20 +307,22 @@ async function loadData(){
   if(!id) return;
 
   const res = await fetch("/api/telemetry/"+id,{
-    headers:{"Authorization":"Bearer "+token}
+    headers:{Authorization:"Bearer "+token}
   });
 
   const data = await res.json();
   if(!data.length) return;
 
   const last = data[data.length-1];
-  temp.textContent = last.temperatura;
+
+  temp.textContent = last.temperatura+" °C";
   ph.textContent = last.ph;
 
   chart.data.labels = data.map(d=>d.horario);
   chart.data.datasets[0].data = data.map(d=>d.temperatura);
   chart.update();
 }
+
 </script>
 
 </body>
