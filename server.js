@@ -1,17 +1,70 @@
 const express = require("express");
-const app = express();
+const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 
+const app = express();
 app.use(express.json());
 
-let dadosRecebidos = [];
+const MONGODB_URI = process.env.MONGODB_URI;
+const JWT_SECRET = process.env.JWT_SECRET;
+
+mongoose.connect(MONGODB_URI)
+  .then(() => console.log("MongoDB conectado"))
+  .catch(err => console.error("Erro MongoDB:", err));
+
+const UserSchema = new mongoose.Schema({
+  name: String,
+  email: { type: String, unique: true },
+  passwordHash: String
+});
+
+const DeviceSchema = new mongoose.Schema({
+  userId: mongoose.Schema.Types.ObjectId,
+  name: String,
+  deviceId: { type: String, unique: true },
+  apiKey: String,
+  createdAt: { type: Date, default: Date.now }
+});
+
+const TelemetrySchema = new mongoose.Schema({
+  userId: mongoose.Schema.Types.ObjectId,
+  deviceId: String,
+  temperatura: Number,
+  ph: Number,
+  data: String,
+  horario: String,
+  mensagem: String,
+  createdAt: { type: Date, default: Date.now }
+});
+
+const User = mongoose.model("User", UserSchema);
+const Device = mongoose.model("Device", DeviceSchema);
+const Telemetry = mongoose.model("Telemetry", TelemetrySchema);
+
+function authUser(req, res, next) {
+  const header = req.headers.authorization;
+
+  if (!header) return res.status(401).json({ erro: "Token ausente" });
+
+  const token = header.replace("Bearer ", "");
+
+  try {
+    req.user = jwt.verify(token, JWT_SECRET);
+    next();
+  } catch {
+    res.status(401).json({ erro: "Token inválido" });
+  }
+}
 
 app.get("/", (req, res) => {
   res.send(`
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8" />
-  <title>Dashboard ESP32</title>
+  <meta charset="UTF-8">
+  <title>ESP32 Dashboard</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     body {
@@ -21,221 +74,399 @@ app.get("/", (req, res) => {
       color: #e5e7eb;
     }
 
-    header {
-      padding: 24px;
-      text-align: center;
-      background: #111827;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-    }
-
-    h1 {
-      margin: 0;
-      color: #38bdf8;
-    }
-
     .container {
       max-width: 1100px;
-      margin: 30px auto;
-      padding: 20px;
+      margin: auto;
+      padding: 30px;
+    }
+
+    .box {
+      background: #1e293b;
+      padding: 25px;
+      border-radius: 18px;
+      margin-bottom: 25px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.25);
+    }
+
+    input, button, select {
+      padding: 12px;
+      margin: 6px;
+      border-radius: 8px;
+      border: none;
+    }
+
+    input, select {
+      background: #334155;
+      color: white;
+    }
+
+    button {
+      background: #38bdf8;
+      color: #020617;
+      font-weight: bold;
+      cursor: pointer;
     }
 
     .cards {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
       gap: 20px;
-      margin-bottom: 30px;
     }
 
     .card {
-      background: #1e293b;
-      border-radius: 18px;
-      padding: 24px;
-      box-shadow: 0 10px 25px rgba(0,0,0,0.25);
-    }
-
-    .card h2 {
-      margin: 0 0 10px;
-      font-size: 16px;
-      color: #94a3b8;
+      background: #020617;
+      padding: 20px;
+      border-radius: 16px;
     }
 
     .valor {
-      font-size: 34px;
+      font-size: 32px;
       font-weight: bold;
-      color: #f8fafc;
+      color: #38bdf8;
     }
 
-    .graficos {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 25px;
+    canvas {
+      background: white;
+      border-radius: 12px;
+      padding: 12px;
     }
 
-    .grafico-box {
-      background: #1e293b;
-      border-radius: 18px;
-      padding: 24px;
-      box-shadow: 0 10px 25px rgba(0,0,0,0.25);
+    pre {
+      background: #020617;
+      padding: 15px;
+      border-radius: 12px;
+      overflow: auto;
     }
 
-    .status {
-      margin-top: 20px;
-      text-align: center;
-      color: #22c55e;
-      font-size: 14px;
+    .hidden {
+      display: none;
     }
   </style>
 </head>
 <body>
-  <header>
-    <h1>Dashboard ESP32</h1>
-    <p>Temperatura e pH em tempo real</p>
-  </header>
+<div class="container">
+  <h1>Dashboard ESP32</h1>
 
-  <div class="container">
-    <div class="cards">
-      <div class="card">
-        <h2>Temperatura</h2>
-        <div class="valor" id="temperatura">-- °C</div>
-      </div>
+  <div id="authBox" class="box">
+    <h2>Login</h2>
+    <input id="email" placeholder="Email">
+    <input id="senha" type="password" placeholder="Senha">
+    <button onclick="login()">Entrar</button>
 
-      <div class="card">
-        <h2>pH</h2>
-        <div class="valor" id="ph">--</div>
-      </div>
-
-      <div class="card">
-        <h2>Última data</h2>
-        <div class="valor" id="data">--</div>
-      </div>
-
-      <div class="card">
-        <h2>Último horário</h2>
-        <div class="valor" id="horario">--</div>
-      </div>
-    </div>
-
-    <div class="graficos">
-      <div class="grafico-box">
-        <canvas id="graficoTemperatura"></canvas>
-      </div>
-
-      <div class="grafico-box">
-        <canvas id="graficoPh"></canvas>
-      </div>
-    </div>
-
-    <div class="status" id="status">Aguardando dados...</div>
+    <h3>Criar conta</h3>
+    <input id="nomeCadastro" placeholder="Nome">
+    <input id="emailCadastro" placeholder="Email">
+    <input id="senhaCadastro" type="password" placeholder="Senha">
+    <button onclick="cadastrar()">Cadastrar</button>
   </div>
 
-  <script>
-    const ctxTemp = document.getElementById("graficoTemperatura");
-    const ctxPh = document.getElementById("graficoPh");
+  <div id="dashboardBox" class="hidden">
+    <div class="box">
+      <button onclick="logout()">Sair</button>
+      <h2>Cadastrar ESP32</h2>
+      <input id="nomeDevice" placeholder="Nome do ESP32">
+      <input id="deviceId" placeholder="Device ID. Ex: esp32_001">
+      <button onclick="criarDevice()">Cadastrar dispositivo</button>
+    </div>
 
-    const graficoTemperatura = new Chart(ctxTemp, {
-      type: "line",
-      data: {
-        labels: [],
-        datasets: [{
-          label: "Temperatura °C",
-          data: [],
-          borderWidth: 3,
-          tension: 0.35
-        }]
-      },
-      options: {
-        responsive: true,
-        scales: {
-          y: { beginAtZero: false }
-        }
-      }
-    });
+    <div class="box">
+      <h2>Meus dispositivos</h2>
+      <select id="devices" onchange="carregarDados()"></select>
+      <pre id="deviceInfo"></pre>
+    </div>
 
-    const graficoPh = new Chart(ctxPh, {
-      type: "line",
-      data: {
-        labels: [],
-        datasets: [{
-          label: "pH",
-          data: [],
-          borderWidth: 3,
-          tension: 0.35
-        }]
-      },
-      options: {
-        responsive: true,
-        scales: {
-          y: {
-            suggestedMin: 0,
-            suggestedMax: 14
-          }
-        }
-      }
-    });
+    <div class="cards">
+      <div class="card">
+        <h3>Temperatura</h3>
+        <div id="tempAtual" class="valor">-- °C</div>
+      </div>
+      <div class="card">
+        <h3>pH</h3>
+        <div id="phAtual" class="valor">--</div>
+      </div>
+      <div class="card">
+        <h3>Última leitura</h3>
+        <div id="ultimaLeitura" class="valor">--</div>
+      </div>
+    </div>
 
-    async function atualizarDashboard() {
-      try {
-        const resposta = await fetch("/api/dados");
-        const dados = await resposta.json();
+    <div class="box">
+      <h2>Temperatura</h2>
+      <canvas id="graficoTemp"></canvas>
+    </div>
 
-        if (dados.length === 0) {
-          document.getElementById("status").innerText = "Aguardando dados do ESP32...";
-          return;
-        }
+    <div class="box">
+      <h2>pH</h2>
+      <canvas id="graficoPh"></canvas>
+    </div>
+  </div>
+</div>
 
-        const ultimo = dados[dados.length - 1];
+<script>
+let token = localStorage.getItem("token");
+let tempChart;
+let phChart;
 
-        document.getElementById("temperatura").innerText = ultimo.temperatura + " °C";
-        document.getElementById("ph").innerText = ultimo.ph;
-        document.getElementById("data").innerText = ultimo.data;
-        document.getElementById("horario").innerText = ultimo.horario;
+if (token) mostrarDashboard();
 
-        const labels = dados.map(item => item.horario);
-        const temperaturas = dados.map(item => item.temperatura);
-        const phs = dados.map(item => item.ph);
+async function cadastrar() {
+  const res = await fetch("/api/register", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      name: document.getElementById("nomeCadastro").value,
+      email: document.getElementById("emailCadastro").value,
+      password: document.getElementById("senhaCadastro").value
+    })
+  });
 
-        graficoTemperatura.data.labels = labels;
-        graficoTemperatura.data.datasets[0].data = temperaturas;
-        graficoTemperatura.update();
+  alert(JSON.stringify(await res.json()));
+}
 
-        graficoPh.data.labels = labels;
-        graficoPh.data.datasets[0].data = phs;
-        graficoPh.update();
+async function login() {
+  const res = await fetch("/api/login", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      email: document.getElementById("email").value,
+      password: document.getElementById("senha").value
+    })
+  });
 
-        document.getElementById("status").innerText = "Dados atualizados automaticamente";
-      } catch (erro) {
-        document.getElementById("status").innerText = "Erro ao buscar dados";
-        console.error(erro);
-      }
-    }
+  const data = await res.json();
 
-    setInterval(atualizarDashboard, 2000);
-    atualizarDashboard();
-  </script>
+  if (data.token) {
+    token = data.token;
+    localStorage.setItem("token", token);
+    mostrarDashboard();
+  } else {
+    alert(JSON.stringify(data));
+  }
+}
+
+function logout() {
+  localStorage.removeItem("token");
+  location.reload();
+}
+
+async function mostrarDashboard() {
+  document.getElementById("authBox").classList.add("hidden");
+  document.getElementById("dashboardBox").classList.remove("hidden");
+
+  iniciarGraficos();
+  await carregarDevices();
+  setInterval(carregarDados, 3000);
+}
+
+function iniciarGraficos() {
+  tempChart = new Chart(document.getElementById("graficoTemp"), {
+    type: "line",
+    data: { labels: [], datasets: [{ label: "Temperatura °C", data: [], borderWidth: 3, tension: 0.3 }] }
+  });
+
+  phChart = new Chart(document.getElementById("graficoPh"), {
+    type: "line",
+    data: { labels: [], datasets: [{ label: "pH", data: [], borderWidth: 3, tension: 0.3 }] },
+    options: { scales: { y: { suggestedMin: 0, suggestedMax: 14 } } }
+  });
+}
+
+async function criarDevice() {
+  const res = await fetch("/api/devices", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer " + token
+    },
+    body: JSON.stringify({
+      name: document.getElementById("nomeDevice").value,
+      deviceId: document.getElementById("deviceId").value
+    })
+  });
+
+  const data = await res.json();
+  alert("Dispositivo criado. Copie a API Key para o ESP32:\\n\\n" + data.apiKey);
+  await carregarDevices();
+}
+
+async function carregarDevices() {
+  const res = await fetch("/api/devices", {
+    headers: { "Authorization": "Bearer " + token }
+  });
+
+  const devices = await res.json();
+  const select = document.getElementById("devices");
+  select.innerHTML = "";
+
+  devices.forEach(d => {
+    const opt = document.createElement("option");
+    opt.value = d.deviceId;
+    opt.textContent = d.name + " - " + d.deviceId;
+    select.appendChild(opt);
+  });
+
+  if (devices.length > 0) {
+    document.getElementById("deviceInfo").textContent =
+      "Dispositivo selecionado: " + devices[0].deviceId;
+    carregarDados();
+  }
+}
+
+async function carregarDados() {
+  const deviceId = document.getElementById("devices").value;
+  if (!deviceId) return;
+
+  const res = await fetch("/api/telemetry/" + deviceId, {
+    headers: { "Authorization": "Bearer " + token }
+  });
+
+  const dados = await res.json();
+
+  if (!Array.isArray(dados) || dados.length === 0) return;
+
+  const ultimo = dados[dados.length - 1];
+
+  document.getElementById("tempAtual").textContent = ultimo.temperatura + " °C";
+  document.getElementById("phAtual").textContent = ultimo.ph;
+  document.getElementById("ultimaLeitura").textContent = ultimo.horario || "--";
+
+  const labels = dados.map(d => d.horario || new Date(d.createdAt).toLocaleTimeString());
+  const temps = dados.map(d => d.temperatura);
+  const phs = dados.map(d => d.ph);
+
+  tempChart.data.labels = labels;
+  tempChart.data.datasets[0].data = temps;
+  tempChart.update();
+
+  phChart.data.labels = labels;
+  phChart.data.datasets[0].data = phs;
+  phChart.update();
+}
+</script>
 </body>
 </html>
-  `);
+`);
 });
 
-app.get("/api/dados", (req, res) => {
-  res.json(dadosRecebidos);
+app.post("/api/register", async (req, res) => {
+  try {
+    const { name, email, password } = req.body;
+
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    const user = await User.create({
+      name,
+      email,
+      passwordHash
+    });
+
+    res.json({ status: "ok", userId: user._id });
+  } catch (err) {
+    res.status(400).json({ erro: "Erro ao cadastrar usuário", detalhe: err.message });
+  }
 });
 
-app.post("/dados", (req, res) => {
-  const dados = req.body;
+app.post("/api/login", async (req, res) => {
+  const { email, password } = req.body;
 
-  console.log("Dados recebidos:", dados);
+  const user = await User.findOne({ email });
 
-  dadosRecebidos.push(dados);
-
-  if (dadosRecebidos.length > 50) {
-    dadosRecebidos.shift();
+  if (!user) {
+    return res.status(401).json({ erro: "Usuário não encontrado" });
   }
 
-  res.json({
-    status: "ok",
-    recebido: dados
+  const ok = await bcrypt.compare(password, user.passwordHash);
+
+  if (!ok) {
+    return res.status(401).json({ erro: "Senha inválida" });
+  }
+
+  const token = jwt.sign(
+    { userId: user._id, email: user.email },
+    JWT_SECRET,
+    { expiresIn: "7d" }
+  );
+
+  res.json({ token });
+});
+
+app.post("/api/devices", authUser, async (req, res) => {
+  try {
+    const { name, deviceId } = req.body;
+
+    const apiKey = crypto.randomBytes(32).toString("hex");
+
+    const device = await Device.create({
+      userId: req.user.userId,
+      name,
+      deviceId,
+      apiKey
+    });
+
+    res.json({
+      status: "ok",
+      deviceId: device.deviceId,
+      apiKey: device.apiKey
+    });
+  } catch (err) {
+    res.status(400).json({ erro: "Erro ao criar dispositivo", detalhe: err.message });
+  }
+});
+
+app.get("/api/devices", authUser, async (req, res) => {
+  const devices = await Device.find({ userId: req.user.userId }).select("-apiKey");
+  res.json(devices);
+});
+
+app.post("/dados", async (req, res) => {
+  try {
+    const { deviceId, apiKey, temperatura, ph, data, horario, mensagem } = req.body;
+
+    const device = await Device.findOne({ deviceId, apiKey });
+
+    if (!device) {
+      return res.status(401).json({ erro: "Dispositivo não autorizado" });
+    }
+
+    const registro = await Telemetry.create({
+      userId: device.userId,
+      deviceId,
+      temperatura,
+      ph,
+      data,
+      horario,
+      mensagem
+    });
+
+    res.json({
+      status: "ok",
+      id: registro._id
+    });
+  } catch (err) {
+    res.status(400).json({ erro: "Erro ao receber dados", detalhe: err.message });
+  }
+});
+
+app.get("/api/telemetry/:deviceId", authUser, async (req, res) => {
+  const deviceId = req.params.deviceId;
+
+  const device = await Device.findOne({
+    userId: req.user.userId,
+    deviceId
   });
+
+  if (!device) {
+    return res.status(403).json({ erro: "Acesso negado" });
+  }
+
+  const dados = await Telemetry.find({
+    userId: req.user.userId,
+    deviceId
+  })
+    .sort({ createdAt: -1 })
+    .limit(50);
+
+  res.json(dados.reverse());
 });
 
 const PORT = process.env.PORT || 3000;
